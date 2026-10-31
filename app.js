@@ -383,7 +383,8 @@
       const shows = arr.map(normalizeShow).filter(Boolean);
       const settings = {
         samplerDismissed: Boolean(data && data.settings && data.settings.samplerDismissed),
-        seedVersion: Number(data && data.settings && data.settings.seedVersion) || 1
+        seedVersion: Number(data && data.settings && data.settings.seedVersion) || 1,
+        progressSeed: Number(data && data.settings && data.settings.progressSeed) || 0
       };
       return { shows, settings };
     } catch (err) {
@@ -1547,6 +1548,7 @@
       };
     }
     state.shows.forEach(adoptSeedArt);
+    applyProgressSeed();
     save();
 
     resetFilters();
@@ -2125,6 +2127,29 @@
     save();
   }
 
+  const PROGRESS_SEED_VERSION = 1;
+  const PROGRESS_SEED = { catalog: 'the-mentalist', season: 3, episode: 13 };
+
+  function applyProgressSeed() {
+    if (state.settings.progressSeed >= PROGRESS_SEED_VERSION) return false;
+    state.shows.forEach(show => {
+      if (show.episodeCatalog !== PROGRESS_SEED.catalog) return;
+      catalogFor(show).forEach(ep => {
+        if (ep.s > PROGRESS_SEED.season) return;
+        if (ep.s === PROGRESS_SEED.season && ep.e > PROGRESS_SEED.episode) return;
+        const key = epCode(ep);
+        const existing = show.episodeEntries[key];
+        if (existing) {
+          existing.watched = true;
+          return;
+        }
+        show.episodeEntries[key] = { rating: 0, review: '', watched: true, updatedAt: Date.now() };
+      });
+    });
+    state.settings.progressSeed = PROGRESS_SEED_VERSION;
+    return true;
+  }
+
   function boot() {
     activeProfile = readProfile();
     migrateLegacyProfile();
@@ -2142,6 +2167,7 @@
       };
       save();
     }
+    if (applyProgressSeed()) save();
 
     dom.sortSelect.value = ui.sort;
     bindEvents();
