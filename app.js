@@ -4,6 +4,20 @@
 
   const KEY = 'screening-room.v1';
   const PROFILE_KEY = 'screening-room.profile';
+  const SHARED_SEEN_KEY = 'screening-room.sharedSeen';
+  const SHARED_SEEN_TIME_KEY = 'screening-room.sharedSeenTime';
+  const CLOUD_NODE = 'screening-room';
+
+  /* Shared library: ratings stay per profile, seen episodes sync across profiles. */
+  const CLOUD_CONFIG = {
+    apiKey: 'AIzaSyBImHItn0ENQPEatfD1uFzEYpkBnx9cCY0',
+    authDomain: 'shows4smiles.firebaseapp.com',
+    databaseURL: 'https://shows4smiles-default-rtdb.asia-southeast1.firebasedatabase.app',
+    projectId: 'shows4smiles',
+    storageBucket: 'shows4smiles.firebasestorage.app',
+    messagingSenderId: '1063404061114',
+    appId: '1:1063404061114:web:c6219b048f2cbf77089d83'
+  };
   const PROFILES = [
     { id: 'david', name: 'David', initials: 'DA' },
     { id: 'shanice', name: 'Shanice', initials: 'SH' }
@@ -76,6 +90,7 @@
     importBtn: document.getElementById('importBtn'),
     importFile: document.getElementById('importFile'),
     clearBtn: document.getElementById('clearBtn'),
+    cloudNote: document.getElementById('cloudNote'),
     shelfPage: document.getElementById('shelfPage'),
     journalPage: document.getElementById('journalPage'),
     shelfSubline: document.getElementById('shelfSubline'),
@@ -262,6 +277,256 @@
     }
   }
 
+  function readSharedSeen() {
+    try {
+      const raw = localStorage.getItem(SHARED_SEEN_KEY);
+      const data = raw ? JSON.parse(raw) : null;
+      return data && typeof data === 'object' && !Array.isArray(data) ? data : {};
+    } catch (err) {
+      return {};
+    }
+  }
+
+  function readSeenTime() {
+    try {
+      return Number(localStorage.getItem(SHARED_SEEN_TIME_KEY)) || 0;
+    } catch (err) {
+      return 0;
+    }
+  }
+
+  function writeSharedSeen(shared, at) {
+    try {
+      localStorage.setItem(SHARED_SEEN_KEY, JSON.stringify(shared));
+      localStorage.setItem(SHARED_SEEN_TIME_KEY, String(Number(at) >= 0 ? Number(at) : Date.now()));
+    } catch (err) {
+      console.warn('Screening Room: could not save shared seen state.', err);
+    }
+  }
+
+  function collectSeenFromStore(profileId, catalogId) {
+    const out = {};
+    try {
+      const raw = localStorage.getItem(dataKey(profileId));
+      if (!raw) return out;
+      const data = JSON.parse(raw);
+      const shows = Array.isArray(data) ? data : (data && Array.isArray(data.shows) ? data.shows : []);
+      shows.forEach(show => {
+        if (!show || show.episodeCatalog !== catalogId || !show.episodeEntries) return;
+        Object.keys(show.episodeEntries).forEach(key => {
+          if (show.episodeEntries[key] && show.episodeEntries[key].watched) out[key] = true;
+        });
+      });
+    } catch (err) {
+      return out;
+    }
+    return out;
+  }
+
+  function setSharedSeen(show, key, watched) {
+    if (!show || !show.episodeCatalog) return;
+    const shared = readSharedSeen();
+    const bucket = shared[show.episodeCatalog] || (shared[show.episodeCatalog] = {});
+    if (watched) bucket[key] = true;
+    else delete bucket[key];
+    writeSharedSeen(shared);
+  }
+
+  function syncSharedSeen() {
+    const shared = readSharedSeen();
+    let sharedDirty = false;
+    let changed = false;
+
+    state.shows.forEach(show => {
+      const catalogId = show.episodeCatalog;
+      if (!catalogId) return;
+      let bucket = shared[catalogId];
+      if (!bucket || typeof bucket !== 'object') {
+        bucket = {};
+        PROFILES.forEach(profile => {
+          const seen = collectSeenFromStore(profile.id, catalogId);
+          Object.keys(seen).forEach(key => { bucket[key] = true; });
+        });
+        shared[catalogId] = bucket;
+        sharedDirty = true;
+      }
+      catalogFor(show).forEach(ep => {
+        const key = epCode(ep);
+        const entry = show.episodeEntries[key];
+        const seen = Boolean(bucket[key]);
+        if (entry) {
+          if (entry.watched !== seen) {
+            entry.watched = seen;
+            changed = true;
+          }
+        } else if (seen) {
+          show.episodeEntries[key] = { rating: 0, review: '', watched: true, updatedAt: Date.now() };
+          changed = true;
+        }
+      });
+    });
+
+    if (sharedDirty) writeSharedSeen(shared, readSeenTime());
+    return changed;
+  }
+
+  /* ---------- cloud sync (Firebase Realtime Database REST) ---------- */
+
+  let cloudReady = false;
+  let cloudPulling = false;
+  let cloudPushing = false;
+  let cloudPushTimer = null;
+  let lastCloudPull = 0;
+
+  const CLOUD_URL = CLOUD_CONFIG.databaseURL.replace(/\/+$/, '') + '/' + CLOUD_NODE;
+
+  function cloudUrl(path) {
+    return CLOUD_URL + (path ? '/' + path : '') + '.json';
+  }
+
+  function setCloudState(text) {
+    if (dom.cloudNote) dom.cloudNote.textContent = text;
+  }
+
+  function initCloud() {
+    if (typeof fetch !== 'function') {
+      setCloudState('Cloud unavailable — saving on this device.');
+      return;
+    }
+    setCloudState('Cloud connected — checking the shared library…');
+  }
+
+  async function cloudRequest(path, options) {
+    const res = await fetch(cloudUrl(path), Object.assign({ cache: 'no-store' }, options || {}));
+    if (!res.ok) throw new Error('Cloud request failed (' + res.status + ')');
+    return res.json();
+  }
+
+  function toList(value) {
+    if (Array.isArray(value)) return value;
+    if (!value || typeof value !== 'object') return [];
+    return Object.keys(value)
+      .sort((a, b) => Number(a) - Number(b))
+      .map(key => value[key]);
+  }
+
+  function cloudProfileState(remote) {
+    if (!remote || typeof remote !== 'object') return null;
+    const settings = remote.settings && typeof remote.settings === 'object' ? remote.settings : {};
+    return {
+      shows: toList(remote.shows).map(normalizeShow).filter(Boolean),
+      settings: {
+        samplerDismissed: Boolean(settings.samplerDismissed),
+        seedVersion: Number(settings.seedVersion) || 1,
+        progressSeed: Number(settings.progressSeed) || 0,
+        updatedAt: Number(remote.updatedAt) || 0
+      }
+    };
+  }
+
+  function scheduleCloudPush() {
+    if (!cloudReady) return;
+    clearTimeout(cloudPushTimer);
+    cloudPushTimer = setTimeout(cloudPush, 1100);
+  }
+
+  function cloudPush() {
+    if (!cloudReady || cloudPushing) return;
+    clearTimeout(cloudPushTimer);
+    cloudPushTimer = null;
+    if (!Number(state.settings.updatedAt)) {
+      state.settings.updatedAt = Date.now();
+      try {
+        localStorage.setItem(dataKey(activeProfile), JSON.stringify({ version: 1, shows: state.shows, settings: state.settings }));
+      } catch (err) { /* local save already handles this */ }
+    }
+    const profile = {
+      updatedAt: Number(state.settings.updatedAt) || Date.now(),
+      shows: state.shows,
+      settings: state.settings
+    };
+    const seenState = { map: readSharedSeen(), at: readSeenTime() };
+    const put = (path, body) => cloudRequest(path, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+    cloudPushing = true;
+    Promise.all([
+      put('profiles/' + activeProfile, profile),
+      put('seenState', seenState)
+    ]).then(
+      () => setCloudState('Cloud synced · seen is shared between profiles'),
+      err => {
+        console.warn('Screening Room: cloud write failed.', err);
+        setCloudState('Cloud unavailable — saving on this device.');
+      }
+    ).finally(() => { cloudPushing = false; });
+  }
+
+  async function cloudPull(force) {
+    if (cloudPulling) return;
+    if (!force && Date.now() - lastCloudPull < 5000) return;
+    if (ui.drawerId || dom.modal.classList.contains('is-open')) return;
+    cloudPulling = true;
+    lastCloudPull = Date.now();
+    try {
+      const data = await cloudRequest('');
+      if (!data) {
+        cloudReady = true;
+        setCloudState('Cloud connected — saving this library.');
+        cloudPush();
+        return;
+      }
+
+      let changed = false;
+      const seenState = data.seenState && typeof data.seenState === 'object' ? data.seenState : {};
+      const remoteSeen = seenState.map && typeof seenState.map === 'object' ? seenState.map : {};
+      const remoteSeenAt = Number(seenState.at) || 0;
+      const localSeenAt = readSeenTime();
+      const hasRemoteSeen = remoteSeenAt > 0 || Object.keys(remoteSeen).length > 0;
+      if (hasRemoteSeen && (remoteSeenAt > localSeenAt || localSeenAt === 0)) {
+        writeSharedSeen(remoteSeen, remoteSeenAt);
+        if (syncSharedSeen()) changed = true;
+      }
+
+      const remote = data.profiles && data.profiles[activeProfile];
+      const remoteAt = remote ? Number(remote.updatedAt) || 0 : 0;
+      const localAt = Number(state.settings.updatedAt) || 0;
+      if (remote && (remoteAt > localAt || localAt === 0)) {
+        const incoming = cloudProfileState(remote);
+        if (incoming) {
+          state = incoming;
+          migrateSeeds();
+          state.shows.forEach(adoptSeedArt);
+          applyProgressSeed();
+          syncSharedSeen();
+          save({ stamp: false, cloud: false });
+          changed = true;
+        }
+      }
+
+      cloudReady = true;
+
+      if (changed) {
+        if (ui.drawerId && !getShow(ui.drawerId)) hideDrawer();
+        save({ stamp: false, cloud: false });
+        renderDataViews();
+      }
+
+      if (localSeenAt > remoteSeenAt || localAt > remoteAt || !remote) {
+        cloudPush();
+      } else {
+        setCloudState('Cloud synced · seen is shared between profiles');
+      }
+    } catch (err) {
+      console.warn('Screening Room: cloud read failed.', err);
+      setCloudState('Cloud unavailable — saving on this device.');
+    } finally {
+      cloudPulling = false;
+    }
+  }
+
   function focusLibraryLanding() {
     requestAnimationFrame(() => {
       const card = document.querySelector('#shelfSections [data-open]');
@@ -384,7 +649,8 @@
       const settings = {
         samplerDismissed: Boolean(data && data.settings && data.settings.samplerDismissed),
         seedVersion: Number(data && data.settings && data.settings.seedVersion) || 1,
-        progressSeed: Number(data && data.settings && data.settings.progressSeed) || 0
+        progressSeed: Number(data && data.settings && data.settings.progressSeed) || 0,
+        updatedAt: Number(data && data.settings && data.settings.updatedAt) || 0
       };
       return { shows, settings };
     } catch (err) {
@@ -393,7 +659,9 @@
     }
   }
 
-  function save() {
+  function save(options) {
+    const opts = options || {};
+    if (opts.stamp !== false) state.settings.updatedAt = Date.now();
     try {
       localStorage.setItem(dataKey(activeProfile), JSON.stringify({ version: 1, shows: state.shows, settings: state.settings }));
     } catch (err) {
@@ -403,6 +671,7 @@
         toast('Could not save to this browser.');
       }
     }
+    if (opts.cloud !== false) scheduleCloudPush();
   }
 
   function markTouched(show) {
@@ -1544,17 +1813,19 @@
     } else {
       state = {
         shows: seedShows(),
-        settings: { samplerDismissed: false, seedVersion: SEED_VERSION }
+        settings: { samplerDismissed: false, seedVersion: SEED_VERSION, updatedAt: 0 }
       };
     }
     state.shows.forEach(adoptSeedArt);
     applyProgressSeed();
-    save();
+    syncSharedSeen();
+    save({ stamp: false, cloud: false });
 
     resetFilters();
     paintProfile();
     renderDataViews();
     toast('Viewing ' + meta.name + "'s shelf.");
+    cloudPull(true);
   }
 
   function closeMenu() {
@@ -1881,6 +2152,7 @@
         const entry = ensureEpisodeEntry(show, ui.episodeCode, true);
         entry.watched = !entry.watched;
         entry.updatedAt = Date.now();
+        setSharedSeen(show, ui.episodeCode, entry.watched);
         markTouched(show);
         paintEpisodeWatched(show);
         save();
@@ -1974,6 +2246,7 @@
         entry.rating = clamp(Math.round(Number(event.target.value) || 0), 0, 10);
         if (entry.rating > 0) entry.watched = true;
         entry.updatedAt = Date.now();
+        setSharedSeen(show, ui.episodeCode, entry.watched);
         markTouched(show);
         paintEpisodeScore(show);
         setSaveState('Saving…', true);
@@ -2154,26 +2427,36 @@
     activeProfile = readProfile();
     migrateLegacyProfile();
     const loaded = loadState();
+    let fresh = false;
     if (loaded) {
       state = loaded;
       migrateSeeds();
       let artAdded = false;
       state.shows.forEach(show => { if (adoptSeedArt(show)) artAdded = true; });
-      if (artAdded) save();
+      if (artAdded) save({ stamp: false, cloud: false });
     } else {
       state = {
         shows: seedShows(),
-        settings: { samplerDismissed: false, seedVersion: SEED_VERSION }
+        settings: { samplerDismissed: false, seedVersion: SEED_VERSION, updatedAt: 0 }
       };
-      save();
+      fresh = true;
     }
-    if (applyProgressSeed()) save();
+    const seeded = applyProgressSeed();
+    const seenSynced = syncSharedSeen();
+    if (seeded || seenSynced || fresh) save({ stamp: false, cloud: false });
 
     dom.sortSelect.value = ui.sort;
     bindEvents();
     paintProfile();
     setPage('shelf');
     renderDataViews();
+
+    initCloud();
+    cloudPull(true);
+    window.addEventListener('focus', () => cloudPull());
+    document.addEventListener('visibilitychange', () => {
+      if (document.visibilityState === 'visible') cloudPull();
+    });
   }
 
   if (document.readyState === 'loading') {
