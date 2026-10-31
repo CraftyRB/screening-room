@@ -1,0 +1,285 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Screening Room — a private shelf</title>
+<meta name="description" content="A local-first shelf for the films and series you keep. Score them, review them, and write notes.">
+<meta name="theme-color" content="#17130f">
+<link rel="icon" type="image/svg+xml" href="favicon.svg">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="preconnect" href="https://static.tvmaze.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&family=Instrument+Serif:ital@0;1&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="styles.css?v=3">
+</head>
+<body>
+<!--
+  Hallmark · macrostructure: shelf-and-inspector · theme: screening-room · genre: atmospheric
+  pre-emit critique: P5 H5 E4 S5 R4 V5
+  slop test: pass (gates 36, 56, 57, 58, 59, 61, 62, 63, 64, 65, 66)
+-->
+
+<div class="grain" aria-hidden="true"></div>
+
+<header class="site-header">
+  <div class="wrap header-bar">
+    <button class="brand" type="button" data-page-target="shelf" aria-label="Screening Room — open the shelf">
+      <svg class="brand-mark" viewBox="0 0 24 24" aria-hidden="true">
+        <rect x="3" y="5" width="18" height="14" rx="1.6"></rect>
+        <path d="M3 16.2 18.2 5.1"></path>
+        <circle cx="6.6" cy="16.1" r="1.2" class="brand-dot"></circle>
+      </svg>
+      <span class="brand-word">Screening Room</span>
+    </button>
+
+    <nav class="page-nav" aria-label="Pages">
+      <button class="nav-link is-active" type="button" id="navShelf" data-page-target="shelf" aria-current="page">
+        Shelf <span class="nav-count" id="navCountShelf">0</span>
+      </button>
+      <button class="nav-link" type="button" id="navJournal" data-page-target="journal">
+        Journal <span class="nav-count" id="navCountJournal">0</span>
+      </button>
+    </nav>
+
+    <div class="header-actions">
+      <button class="btn btn--primary btn--add" type="button" id="addBtn">
+        <svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M10 4v12M4 10h12"></path></svg>
+        <span class="add-full">Add title</span><span class="add-short">Add</span>
+      </button>
+      <div class="menu-wrap">
+        <button class="avatar" type="button" id="avatarBtn" aria-haspopup="menu" aria-expanded="false" aria-label="DA — David, open library menu"><span aria-hidden="true">DA</span></button>
+        <div class="menu" id="profileMenu" role="menu" aria-label="Profile and library actions" hidden>
+          <p class="menu-label">Viewing</p>
+          <button type="button" role="menuitemradio" aria-checked="true" data-profile="david">David <span class="menu-check" aria-hidden="true">✓</span></button>
+          <button type="button" role="menuitemradio" aria-checked="false" data-profile="shanice">Shanice <span class="menu-check" aria-hidden="true">✓</span></button>
+          <p class="menu-label">Library</p>
+          <button type="button" role="menuitem" id="exportBtn">Export JSON</button>
+          <button type="button" role="menuitem" id="importBtn">Import JSON</button>
+          <button type="button" role="menuitem" id="clearBtn">Clear library</button>
+          <p class="menu-note">Each profile saves separately in this browser. Nothing leaves this device unless you export it.</p>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<main class="wrap">
+  <section class="page" id="shelfPage" aria-labelledby="shelfTitle">
+    <header class="masthead">
+      <p class="eyebrow">A private shelf</p>
+      <h1 class="page-title" id="shelfTitle">The <em>shelf</em></h1>
+      <p class="page-sub" id="shelfSubline">An empty shelf, for now.</p>
+    </header>
+
+    <div class="notice" id="samplerNotice" hidden>
+      <p class="notice-tag">Starter</p>
+      <p class="notice-copy" id="samplerCopy"></p>
+      <div class="notice-actions">
+        <button class="btn btn--ghost btn--sm" type="button" id="clearSampler">Clear starter</button>
+        <button class="icon-btn" type="button" id="dismissNotice" aria-label="Dismiss starter note">
+          <svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"></path></svg>
+        </button>
+      </div>
+    </div>
+
+    <div class="ledger" id="ledger">
+      <div class="ledger-cell">
+        <span class="ledger-label">Titles</span>
+        <span class="ledger-value" id="ledgerTitles">00</span>
+      </div>
+      <div class="ledger-cell">
+        <span class="ledger-label">In rotation</span>
+        <span class="ledger-value" id="ledgerWatching">00</span>
+      </div>
+      <div class="ledger-cell">
+        <span class="ledger-label">Average score</span>
+        <span class="ledger-value" id="ledgerAvg">—</span>
+      </div>
+      <div class="ledger-cell">
+        <span class="ledger-label">Notes written</span>
+        <span class="ledger-value" id="ledgerNotes">00</span>
+      </div>
+    </div>
+
+    <div class="toolbar" id="shelfToolbar">
+      <div class="search">
+        <svg class="icon search-icon" viewBox="0 0 20 20" aria-hidden="true">
+          <circle cx="9" cy="9" r="5.4"></circle>
+          <path d="m13.2 13.2 3.4 3.4"></path>
+        </svg>
+        <label class="sr-only" for="shelfSearch">Search your shelf</label>
+        <input id="shelfSearch" type="search" placeholder="Search titles, people, notes" autocomplete="off">
+      </div>
+
+      <div class="chips" id="statusChips" role="group" aria-label="Filter by status">
+        <button class="chip" type="button" data-status="all" aria-pressed="true">All <span class="chip-count" id="countAll">0</span></button>
+        <button class="chip" type="button" data-status="watching" aria-pressed="false">In rotation <span class="chip-count" id="countWatching">0</span></button>
+        <button class="chip" type="button" data-status="watchlist" aria-pressed="false">Watchlist <span class="chip-count" id="countWatchlist">0</span></button>
+        <button class="chip" type="button" data-status="finished" aria-pressed="false">Seen <span class="chip-count" id="countFinished">0</span></button>
+      </div>
+
+      <div class="selects">
+        <div class="select-wrap">
+          <label class="sr-only" for="genreSelect">Filter by genre</label>
+          <select id="genreSelect"></select>
+          <svg class="icon select-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"></path></svg>
+        </div>
+        <div class="select-wrap">
+          <label class="sr-only" for="sortSelect">Sort titles</label>
+          <select id="sortSelect">
+            <option value="added">Recently added</option>
+            <option value="title">Title A–Z</option>
+            <option value="score">Highest score</option>
+            <option value="year">Newest release</option>
+          </select>
+          <svg class="icon select-chevron" viewBox="0 0 20 20" aria-hidden="true"><path d="m6 8 4 4 4-4"></path></svg>
+        </div>
+      </div>
+    </div>
+
+    <div class="shelf-sections" id="shelfSections"></div>
+
+    <div class="empty" id="shelfEmpty" hidden>
+      <span class="empty-mark" aria-hidden="true">
+        <svg viewBox="0 0 40 40"><rect x="4" y="8" width="32" height="24" rx="2"></rect><path d="M4 27 31 8"></path><circle cx="10" cy="27" r="1.8" class="empty-dot"></circle></svg>
+      </span>
+      <h2>Nothing on the shelf yet.</h2>
+      <p>Add a film or a series, then open it to give it a score, write a review, and keep notes. Everything stays in this browser.</p>
+      <div class="empty-actions">
+        <button class="btn btn--primary" type="button" data-action="add">Add your first title</button>
+        <button class="btn btn--ghost" type="button" data-action="load-sampler">Load the starter shelf</button>
+      </div>
+    </div>
+  </section>
+
+  <section class="page" id="journalPage" aria-labelledby="journalTitle" hidden>
+    <header class="masthead">
+      <p class="eyebrow">The notebook</p>
+      <h1 class="page-title" id="journalTitle">The <em>journal</em></h1>
+      <p class="page-sub" id="journalSubline">No entries yet.</p>
+    </header>
+
+    <div class="toolbar" id="journalToolbar">
+      <div class="search">
+        <svg class="icon search-icon" viewBox="0 0 20 20" aria-hidden="true">
+          <circle cx="9" cy="9" r="5.4"></circle>
+          <path d="m13.2 13.2 3.4 3.4"></path>
+        </svg>
+        <label class="sr-only" for="journalSearch">Search your journal</label>
+        <input id="journalSearch" type="search" placeholder="Search reviews and notes" autocomplete="off">
+      </div>
+
+      <div class="chips" id="journalChips" role="group" aria-label="Filter journal entries">
+        <button class="chip" type="button" data-jtype="all" aria-pressed="true">All <span class="chip-count" id="jCountAll">0</span></button>
+        <button class="chip" type="button" data-jtype="review" aria-pressed="false">Reviews <span class="chip-count" id="jCountReview">0</span></button>
+        <button class="chip" type="button" data-jtype="note" aria-pressed="false">Notes <span class="chip-count" id="jCountNote">0</span></button>
+      </div>
+    </div>
+
+    <div class="journal" id="journalFeed"></div>
+  </section>
+</main>
+
+<footer class="site-footer">
+  <div class="wrap footer-inner">
+    <span>Screening Room — a private shelf, kept on this device.</span>
+    <span>Local-first · export any time</span>
+  </div>
+</footer>
+
+<div class="backdrop" id="drawerBackdrop" aria-hidden="true"></div>
+<aside class="drawer" id="drawer" role="dialog" aria-modal="true" aria-hidden="true">
+  <button class="drawer-close" type="button" id="drawerClose" aria-label="Close details">
+    <svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"></path></svg>
+  </button>
+  <div class="drawer-scroll" id="drawerContent"></div>
+</aside>
+
+<div class="backdrop" id="modalBackdrop" aria-hidden="true"></div>
+<div class="modal" id="titleModal" role="dialog" aria-modal="true" aria-labelledby="modalTitle" aria-hidden="true">
+  <div class="modal-head">
+    <p class="modal-kicker" id="modalKicker">Shelf entry</p>
+    <h2 class="modal-title" id="modalTitle">Add a title</h2>
+    <button class="icon-btn modal-close" type="button" id="modalClose" aria-label="Close form">
+      <svg class="icon" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5 5 15"></path></svg>
+    </button>
+  </div>
+
+  <form id="titleForm" class="modal-form" novalidate>
+    <div class="modal-body">
+      <div class="form-grid">
+        <div class="field field--full">
+          <label class="field-label" for="fTitle">Title</label>
+          <input id="fTitle" name="title" type="text" maxlength="120" placeholder="Film or series title" autocomplete="off" required>
+          <p class="field-error" id="titleError" role="alert" hidden>Give the title a name.</p>
+        </div>
+
+        <div class="field">
+          <span class="field-label" id="typeLabel">Format</span>
+          <div class="seg seg--full" role="group" aria-labelledby="typeLabel" id="typeSeg">
+            <button type="button" data-type="film" aria-pressed="true">Film</button>
+            <button type="button" data-type="series" aria-pressed="false">Series</button>
+          </div>
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="fYear">Year</label>
+          <input id="fYear" name="year" type="number" min="1880" max="2100" step="1" placeholder="2024" inputmode="numeric">
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="fCreator">Creator</label>
+          <input id="fCreator" name="creator" type="text" maxlength="120" placeholder="Director, showrunner, studio" autocomplete="off">
+        </div>
+
+        <div class="field">
+          <label class="field-label" for="fGenres">Genres</label>
+          <input id="fGenres" name="genres" type="text" maxlength="120" placeholder="Drama, Thriller" autocomplete="off">
+          <span class="field-hint">Separate with commas.</span>
+        </div>
+
+        <div class="field field--full">
+          <span class="field-label" id="statusLabel">Where it sits</span>
+          <div class="seg seg--full" role="group" aria-labelledby="statusLabel" id="statusSeg">
+            <button type="button" data-status-value="watching" aria-pressed="false">Watching</button>
+            <button type="button" data-status-value="watchlist" aria-pressed="true">Watchlist</button>
+            <button type="button" data-status-value="finished" aria-pressed="false">Seen</button>
+          </div>
+        </div>
+
+        <div class="field" id="episodesField" hidden>
+          <label class="field-label" for="fEpisodes">Total episodes</label>
+          <input id="fEpisodes" name="episodes" type="number" min="1" max="2000" step="1" value="8" inputmode="numeric">
+        </div>
+
+        <div class="field field--full">
+          <label class="field-label" for="fPoster">Poster image URL <span class="optional">optional</span></label>
+          <input id="fPoster" name="poster" type="url" placeholder="https://…" autocomplete="off">
+          <span class="field-hint">No image is fine — a typographic plate is painted from the title.</span>
+          <p class="field-error" id="posterError" role="alert" hidden>Use an http(s) image link.</p>
+        </div>
+      </div>
+    </div>
+
+    <div class="modal-foot">
+      <p class="storage-note">Saved only in this browser.</p>
+      <div class="modal-actions">
+        <button class="btn btn--ghost" type="button" id="modalCancel">Cancel</button>
+        <button class="btn btn--primary" type="submit" id="formSubmit">Add to shelf</button>
+      </div>
+    </div>
+  </form>
+</div>
+
+<div class="toast" id="toast" role="status" aria-live="polite">
+  <span class="toast-msg" id="toastMsg"></span>
+  <button class="toast-action" type="button" id="toastAction" hidden></button>
+</div>
+
+<input type="file" id="importFile" accept="application/json,.json" hidden>
+
+<script src="episodes.js?v=3" defer></script>
+<script src="app.js?v=3" defer></script>
+</body>
+</html>
